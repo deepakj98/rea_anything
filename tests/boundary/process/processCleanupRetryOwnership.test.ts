@@ -21,10 +21,6 @@ const cleanupOptions = (
   const host: ProcessCaptureCleanupHost = {
     platform: process.platform,
     cleanupProcessGroup: async () => ({ cleaned: true, signaled: false }),
-    verifyTokenOwnedProcesses: async () => ({
-      cleaned: true,
-      signaled: false,
-    }),
     removeTemporaryRoot,
   };
   return {
@@ -172,7 +168,7 @@ it("keeps mixed root errors and retry aggregates bound to only unresolved roots"
     expect(second.cleanupIncomplete).toBe(true);
     expect(bothUnresolved.cleanupIncomplete).toBe(true);
     expect(retryFailure.cleanupIncomplete).toBe(true);
-    expect(retryFailure.cleanupResources).toEqual(["temporary_root"]);
+    expect(retryFailure.cleanupResources).toEqual([roots[1]]);
 
     denied.clear();
     await scope.retryCleanup();
@@ -292,7 +288,7 @@ it("blocks scope admission on owner-bound retry failure and resumes after releas
     if (!(retryFailure instanceof ProcessCaptureError))
       throw new Error("Expected a typed owner-bound retry failure");
     expect(retryFailure.cleanupIncomplete).toBe(true);
-    expect(retryFailure.cleanupResources).toEqual(["temporary_root"]);
+    expect(retryFailure.cleanupResources).toEqual([root]);
     expect(origin.cleanupIncomplete).toBe(true);
 
     denyRemoval = false;
