@@ -11,6 +11,10 @@ import {
   inspectPeLoadConfigInputSchema,
   peLoadConfigSchema,
 } from "../../domain/native/peLoadConfig.js";
+import {
+  binaryHardeningSchema,
+  inspectBinaryHardeningInputSchema,
+} from "../../domain/native/binaryHardening.js";
 import { inspectByteEntropyInputSchema } from "../../domain/native/byteEntropy.js";
 import { byteEntropyOutputSchema } from "../toolOutputSchemaGroups.js";
 import {
@@ -56,6 +60,10 @@ import {
   inspectKernelModuleInputSchema,
   kernelModuleSchema,
 } from "../../domain/native/kernelModule.js";
+import {
+  inspectWindowsShortcutInputSchema,
+  windowsShortcutSchema,
+} from "../../domain/native/windowsShortcut.js";
 
 /** Caller-selected delivery of completed binary layout Evidence. */
 export const inspectBinaryLayoutRequestSchema =
@@ -105,6 +113,21 @@ export const BINARY_DIAGNOSTICS_TOOL_CONTRACTS = [
       },
     ],
   },
+  {
+    name: "inspect_binary_hardening",
+    ...toolContractMetadata("inspect_binary_hardening"),
+    kind: "native-provider",
+    description:
+      "Inspect compile-time and link-time hardening of one explicit local ELF, PE, or Mach-O file, including one image per universal Mach-O slice. Reports PIE or ASLR, NX, RELRO, stack-protector signs, FORTIFY signs, control-flow flags and stripped state, each with the header field or import behind it. States are enabled, disabled, partial, unknown, or not_applicable. A missing import in a static or stripped image is unknown, not disabled. Authenticode and Mach-O code-signature rows report table or load-command presence, not validity. Mach-O hardened runtime stays unknown and names inspect_signature. This inspection states that it does not execute the image and does not assess exploitability. Reads a stable regular file. A malformed header returns no partial report, except one bad slice in a universal Mach-O. A symbol table, symbol name, or GNU property note over its budget leaves those rows unknown and keeps the header rows. A dynamic-table budget still fails the ELF report.",
+    inputSchema: inspectBinaryHardeningInputSchema,
+    outputSchema: evidenceResultOf(binaryHardeningSchema),
+    examples: [
+      {
+        title: "Inspect binary hardening",
+        input: { path: "/artifacts/program" },
+      },
+    ],
+  },
 
   {
     name: "inspect_elf_notes",
@@ -126,13 +149,20 @@ export const BINARY_DIAGNOSTICS_TOOL_CONTRACTS = [
     ...toolContractMetadata("inspect_apple_ips"),
     kind: "native-provider",
     description:
-      "Inspect one explicit local Apple .ips crash report without executing a target, launching atos, or opening a disassembler. Parses the first-line metadata object and, when bug_type is the string 309, the crash body: process identity, exception and termination facts, threads, usedImages, lossless integer registers, and deterministic classification from documented SIGKILL, EXC_GUARD, pointer-authentication and dyld strings. Other bug_type values, including 288 stackshots, return no crash result. A missing or truncated body fails without partial success. Opened Mach-O and dSYM UUID joins remain unobserved. Portable on supported Node hosts; no Xcode or pwntools required.",
+      "Inspect one explicit local Apple .ips crash report without executing a target, launching atos, or opening a disassembler. Parses the first-line metadata object and, when bug_type is the string 309, the crash body: process identity, exception and termination facts, threads, usedImages, lossless integer registers, and deterministic classification from documented SIGKILL, EXC_GUARD, pointer-authentication and dyld strings. Other bug_type values, including 288 stackshots, return no crash result. A missing or truncated body fails without partial success. With join_path, every frame whose image UUID and architecture match a slice LC_UUID reports the slice static __TEXT vmaddr plus its image offset as a static address; symbolication and dSYM symbol lookup remain unobserved. Portable on supported Node hosts; no Xcode or pwntools required.",
     inputSchema: inspectAppleIpsInputSchema,
     outputSchema: evidenceResultOf(appleIpsSchema),
     examples: [
       {
         title: "Inspect an Apple .ips crash report",
         input: { path: "/artifacts/app.ips" },
+      },
+      {
+        title: "Join report frames to the crashed Mach-O",
+        input: {
+          path: "/artifacts/app.ips",
+          join_path: "/artifacts/App.app/Contents/MacOS/App",
+        },
       },
     ],
   },
@@ -204,6 +234,21 @@ export const BINARY_DIAGNOSTICS_TOOL_CONTRACTS = [
       {
         title: "Inspect PE import and delay-load identities",
         input: { path: "/artifacts/application.exe" },
+      },
+    ],
+  },
+  {
+    name: "inspect_windows_shortcut",
+    ...toolContractMetadata("inspect_windows_shortcut"),
+    kind: "native-provider",
+    description:
+      "Inspect one explicit local Windows Shell Link (.lnk) file without resolving or executing the target, using COM, or opening a network path. Returns ShellLinkHeader flags, FILETIMEs, ShowCommand and hotkey; LinkTargetIDList item count with documented root/drive/file-entry names and raw hashes for unknown items; LinkInfo volume serial, label, local base path and network share names; StringData name, relative path, working directory, arguments and icon location; and ExtraData blocks including EnvironmentVariable, IconEnvironment, Tracker droid/MAC facts labelled derived, KnownFolder, SpecialFolder, ConsoleFE code page, and PropertyStore raw hashes. Unknown ExtraData signatures are listed. Derived observations cover argument presence and length, target extension, minimized ShowCommand, and an icon location that differs from the target. Reads a stable regular file; malformed HeaderSize or CLSID, exhausted budgets, and odd Unicode lengths return typed failures or partial coverage with the failing offset, never a complete partial inventory. Portable on supported Node hosts; no Windows SDK or engine installation required.",
+    inputSchema: inspectWindowsShortcutInputSchema,
+    outputSchema: evidenceResultOf(windowsShortcutSchema),
+    examples: [
+      {
+        title: "Inspect a Windows Shell Link shortcut",
+        input: { path: "/artifacts/shortcut.lnk" },
       },
     ],
   },

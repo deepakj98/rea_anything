@@ -7,12 +7,13 @@ import { ghidraProfileInstallationHost as host } from "./GhidraInstallation.fixt
 import { GhidraProvider } from "./GhidraProvider.js";
 
 // Digests commit to the current shared policy, including the instruction
-// status, load-image relocation-symbol and procedure search revisions that
-// prevent reuse of snapshots with earlier results.
+// status, load-image relocation-symbol, procedure search, byte-search and
+// bit-field base-type and inventory-search revisions that prevent reuse of snapshots with earlier
+// results.
 const RAW_DIGESTS = {
-  "6502": "4cdde67a88973466321e24d144620b9363bc6f3eed2526ccfdd52e81d204b251",
+  "6502": "540037ef007380e737a606cd14c402a9bdf055132cf44fb73d29ab1ec9f84af6",
   "x86-disabled-analyzer":
-    "08bcaf0939ecefeba82c4b0b9cda6e7bdb975d3b8ad9b9e4aa9fdbd052958fd5",
+    "8498e58d5a1147cdfe7dad2b486b4b4087efc76944ee1902c9af9d0c0da56237",
 } as const;
 
 const configFor = (environment: NodeJS.ProcessEnv) => {
@@ -47,7 +48,14 @@ describe("raw-binary analysis profile digest", () => {
       load_image_evidence: "independent-raw-mapping-context-v4",
       load_image_observations:
         "source-mappings-entry-context-relocation-symbol-v3",
-      instruction_status: "unlisted-address-without-decode-v1",
+      instruction_status: "unlisted-and-containing-code-data-v3",
+      inventory_search_projection: "provider-inventory-facts-v1",
+      value_flow_effect_scope: "pcode-load-store-explicit-v1",
+      byte_search_boundary: "contiguous-eligible-initialized-blocks-v1",
+      byte_search_coverage: "separate-loaded-overlays-v1",
+      data_type_observations: "bit-field-base-and-lookup-v1",
+      instruction_references:
+        "exact-address-incoming-without-synthetic-entry-v3",
       analyzer_preset: "ghidra-default",
     });
   });
@@ -67,6 +75,9 @@ describe("raw-binary analysis profile digest", () => {
       RAW_DIGESTS["x86-disabled-analyzer"],
     );
     expect(resolved.value.profile?.parameters).toMatchObject({
+      inventory_search_projection: "provider-inventory-facts-v1",
+      value_flow_effect_scope: "pcode-load-store-explicit-v1",
+      byte_search_coverage: "separate-loaded-overlays-v1",
       analysis_options: {
         disabled_analyzers: ["Aggressive Instruction Finder"],
       },

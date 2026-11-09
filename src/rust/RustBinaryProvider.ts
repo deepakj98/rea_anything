@@ -1,10 +1,14 @@
 import { RUST_BINARY_PROVIDER_IDENTITY } from "./RustBinaryProviderIdentity.js";
 import {
   projectStableArtifactFailure,
+  stableArtifactInputRecovery,
   projectArtifactCloseFailure,
 } from "../artifacts/StableArtifactFailure.js";
 import { isSelectedRegularFileError } from "../filesystem/RegularFile.js";
-import { readStableArtifact } from "../artifacts/readStableArtifact.js";
+import {
+  type StableArtifactSnapshot,
+  readStableArtifact,
+} from "../artifacts/readStableArtifact.js";
 import {
   artifactFilePrimaryFacts,
   type ArtifactFilePrimaryFacts,
@@ -70,9 +74,10 @@ export class RustBinaryProvider implements RustBinaryPort {
     input: InspectRustBinaryInput,
     options?: ExecutionOptions,
   ): Promise<Result<RustBinary, AnalysisError>> {
+    let snapshot: StableArtifactSnapshot | undefined;
     try {
       return await this.#resources.run(async () => {
-        const snapshot = await readStableArtifact(
+        snapshot = await readStableArtifact(
           input.path,
           RUST_BINARY_INPUT_BYTES,
           options?.signal,
@@ -122,7 +127,7 @@ export class RustBinaryProvider implements RustBinaryPort {
         return ok(parsed.data);
       });
     } catch (cause: unknown) {
-      return err(failureFor(cause, input.path));
+      return err(failureFor(cause, input.path, snapshot));
     }
   }
 }
@@ -275,7 +280,11 @@ const failureForPrimary = (
   return artifactFailure(facts, path);
 };
 
-const failureFor = (cause: unknown, path: string): AnalysisError => {
+const failureFor = (
+  cause: unknown,
+  path: string,
+  snapshot?: StableArtifactSnapshot,
+): AnalysisError => {
   const primary = failureForPrimary(artifactFilePrimaryFacts(cause), path);
   return projectStableArtifactFailure(
     cause,
@@ -283,6 +292,7 @@ const failureFor = (cause: unknown, path: string): AnalysisError => {
     path,
     RUST_BINARY_PROVIDER_IDENTITY.id,
     OPERATION,
+    snapshot,
   );
 };
 
@@ -343,9 +353,11 @@ const artifactReaderFailure = (
       },
     );
   if (cause.reason === "path")
-    return new AnalysisInputError(OPERATION, { cause }, [
-      { path: ["path"], reason: "invalid_format", message: cause.message },
-    ]);
+    return new AnalysisInputError(
+      OPERATION,
+      { cause, ...stableArtifactInputRecovery(cause) },
+      [{ path: ["path"], reason: "invalid_format", message: cause.message }],
+    );
   return new ProviderAdapterError(RUST_BINARY_PROVIDER_IDENTITY.id, OPERATION, {
     cause,
     diagnostics: { path, reason: cause.message },
