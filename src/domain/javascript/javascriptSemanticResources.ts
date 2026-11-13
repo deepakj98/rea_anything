@@ -78,7 +78,11 @@ export const collectJavaScriptSemanticResources = (
   const acquisitions = collectAcquisitions(program, context).filter(
     (candidate) =>
       !socketPortInFirstArgument(candidate) ||
-      (!rejectsSocketPortLiteral(candidate.node, context) &&
+      (!rejectsSocketLiteralArguments(
+        candidate.node,
+        candidate.specifier,
+        context,
+      ) &&
         !rejectsTlsProtocolVersionLiteral(
           candidate.node,
           candidate.specifier,
@@ -89,6 +93,19 @@ export const collectJavaScriptSemanticResources = (
     ...acquisitions.map(immutableAcquisition),
     ...collectReleases(program, context, acquisitions),
   ];
+};
+
+/** Literal kinds Node rejects for both open flags and modes. */
+const rejectsFlagOrModeLiteral = (value: t.Node): boolean => {
+  return (
+    t.isBigIntLiteral(value) ||
+    t.isBooleanLiteral(value) ||
+    t.isRegExpLiteral(value) ||
+    t.isObjectExpression(value) ||
+    t.isArrayExpression(value) ||
+    (t.isUnaryExpression(value) &&
+      t.isBigIntLiteral(unwrapJavaScriptExpression(value.argument).node))
+  );
 };
 
 /**
@@ -132,15 +149,7 @@ const rejectsOpenFlagLiteral = (
   if (isNonFiniteNumber(value, context)) return true;
   // BigInt, boolean, object and array literals all fail Node's flag check. A
   // unary operator over a BigInt literal is a BigInt too.
-  return (
-    t.isBigIntLiteral(value) ||
-    t.isBooleanLiteral(value) ||
-    t.isRegExpLiteral(value) ||
-    t.isObjectExpression(value) ||
-    t.isArrayExpression(value) ||
-    (t.isUnaryExpression(value) &&
-      t.isBigIntLiteral(unwrapJavaScriptExpression(value.argument).node))
-  );
+  return rejectsFlagOrModeLiteral(value);
 };
 
 /**
@@ -321,15 +330,7 @@ const rejectsOpenModeLiteral = (
   // BigInt, boolean, object and array literals all fail Node's mode check. A
   // unary operator over a BigInt literal is a BigInt too, and the range helpers
   // above only price numeric operands.
-  return (
-    t.isBigIntLiteral(value) ||
-    t.isBooleanLiteral(value) ||
-    t.isRegExpLiteral(value) ||
-    t.isObjectExpression(value) ||
-    t.isArrayExpression(value) ||
-    (t.isUnaryExpression(value) &&
-      t.isBigIntLiteral(unwrapJavaScriptExpression(value.argument).node))
-  );
+  return rejectsFlagOrModeLiteral(value);
 };
 
 /** `fs.open`, `fs.openSync` and `fs/promises.open` take the flag in slot 1. */
@@ -447,6 +448,9 @@ const collectReleases = (
       resolution:
         !opaqueReceiver &&
         linked.length === 1 &&
+        (binding.kind !== "parameter" ||
+          semanticBindingAtRead(binding, member.object, context.state)
+            .hasDefiniteInitializer) &&
         holdsOnlyAcquisitions(binding, linked, context.state)
           ? "complete"
           : "partial",
@@ -573,16 +577,25 @@ const resourceCandidateId = (candidate: ResourceCandidate): string =>
  * readable non-port literal is decided. `""` is a path with no length, which
  * Node also rejects.
  *
- * `undefined` and an empty object throw `ERR_MISSING_ARGS`, but those are a
- * missing option rather than a bad port, so they stay undecided here.
+ * `net` also rejects an omitted or undefined port, before it returns a socket.
+ * TLS merges later options, so an undefined first argument alone cannot decide
+ * its admission. Object arguments and spread positions remain undecided here.
  */
-const rejectsSocketPortLiteral = (
+const rejectsSocketLiteralArguments = (
   node: t.CallExpression | t.OptionalCallExpression,
+  specifier: string,
   context: DataEffectTraversalContext,
 ): boolean => {
   const port = node.arguments[0];
-  if (port === undefined || t.isSpreadElement(port)) return false;
+  if (port === undefined) return specifier === "net";
+  if (t.isSpreadElement(port)) return false;
   const value = unwrapJavaScriptExpression(port).node;
+  if (
+    specifier === "net" &&
+    (t.isUnaryExpression(value, { operator: "void" }) ||
+      isUnmodifiedGlobalReference(value, context.state, "undefined"))
+  )
+    return true;
   if (t.isStringLiteral(value)) return value.value.length === 0;
   if (
     t.isNullLiteral(value) ||
@@ -601,13 +614,14 @@ const rejectsSocketPortLiteral = (
     isUnmodifiedGlobalReference(value, context.state, value.name)
   )
     return true;
-  // `-1` and `-1.5` are unary expressions over numeric literals: always out of
-  // range because a port is never negative.
+  // Numeric unary operators are judged by their result: `-0` is port zero,
+  // and `~(-1.5)` is zero too. `typeof` instead yields a nonempty IPC path.
   if (t.isUnaryExpression(value)) {
-    const operand = unwrapJavaScriptExpression(value.argument).node;
+    if (value.operator === "!" || value.operator === "delete") return true;
+    const number = unaryOperandNumber(value, context, 0);
     return (
-      t.isNumericLiteral(operand) &&
-      (value.operator === "-" || !Number.isInteger(operand.value))
+      number !== undefined &&
+      (!Number.isInteger(number) || number < 0 || number > 65535)
     );
   }
   return false;

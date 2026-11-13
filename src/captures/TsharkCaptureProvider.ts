@@ -264,6 +264,22 @@ export class TsharkCaptureProvider implements PacketCapturePort {
               },
             },
           );
+        const invalidUtf8Streams = [
+          ...(output.stdout.invalidUtf8 ? ["stdout"] : []),
+          ...(output.stderr.invalidUtf8 ? ["stderr"] : []),
+        ];
+        if (invalidUtf8Streams.length > 0)
+          throw new AnalysisOutputError(
+            operation,
+            "TShark output is not valid UTF-8; retained text contains replacement characters.",
+            {
+              capturedOutput,
+              diagnostics: {
+                stage: phase,
+                invalid_utf8_streams: invalidUtf8Streams,
+              },
+            },
+          );
         return output;
       };
       phase = "configuration";
@@ -458,11 +474,11 @@ export class TsharkCaptureProvider implements PacketCapturePort {
     workspacePath: string | null,
     effectiveLimits: LinuxResourceLimits | undefined,
     observedOutput: AnalysisCapturedOutput | undefined,
-    operation = OPERATION,
+    operation: string,
     limits: {
       readonly output_bytes: number;
       readonly command_timeout_ms: number;
-    } = LIMITS,
+    },
   ): AnalysisError {
     if (cause instanceof AnalysisError) return cause;
     if (cause instanceof ArtifactReaderFailure && cause.cleanup !== undefined)

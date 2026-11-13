@@ -1,18 +1,123 @@
 import { describe, expect, it } from "vitest";
 
 import { AnalysisResourceConstraintError } from "../domain/analysisErrorCore.js";
+import { readHomeFiles } from "./ComputerHomeFiles.js";
 import {
   AgentEnvComputer,
   GUEST_FILE_ANSWER_COPIES,
   GUEST_FILE_ANSWER_SOURCE,
   guestFileAnswerBytes,
-  guestFileAnswerCeiling,
   guestFileAnswerRefusal,
   guestFileAnswerWorkingBytes,
   retainGuestFiles,
 } from "./AgentEnvComputer.js";
 
+describe("guest file encoding", () => {
+  const read = (encoded: string) =>
+    readHomeFiles(
+      async () => ({
+        result: {
+          parts: [
+            {
+              file: { bytes: encoded },
+              metadata: {
+                "urn:agentenv:data-objects/v1": { path: "selected.bin" },
+              },
+            },
+          ],
+        },
+      }),
+      (text) => text,
+      ["selected.bin"],
+    );
+
+  it.each(["!!!", "aGVsbG8=garbage", "aGVsbG8", "Zh==", "AA-_"])(
+    "rejects malformed base64 %j before retaining file bytes",
+    async (encoded) => {
+      await expect(read(encoded)).rejects.toThrow(
+        "Expected canonical padded base64",
+      );
+    },
+  );
+
+  it.each([
+    Buffer.alloc(0),
+    Buffer.from("hello"),
+    Buffer.from([0, 255, 128, 0]),
+  ])("preserves valid empty, text and binary files: %j", async (bytes) => {
+    await expect(read(bytes.toString("base64"))).resolves.toEqual([
+      { path: "selected.bin", bytes },
+    ]);
+  });
+});
+
+describe("guest data-object metadata", () => {
+  it.each([null, 42, { path: 42 }])(
+    "refuses malformed known-namespace facts: %j",
+    async (metadata) => {
+      await expect(
+        readHomeFiles(
+          async () => ({
+            result: {
+              parts: [
+                {
+                  file: { bytes: "aGVsbG8=" },
+                  metadata: { "urn:agentenv:data-objects/v1": metadata },
+                },
+              ],
+            },
+          }),
+          (text) => text,
+          ["selected.bin"],
+        ),
+      ).rejects.toThrow();
+    },
+  );
+});
+
 describe("guest file answers", () => {
+  it.each(
+    [true, false].flatMap((present) =>
+      [{ path: "other.txt" }, "download", 42, false, null, ["trace"]].map(
+        (unrelated) => ({ present, unrelated }),
+      ),
+    ),
+  )(
+    "uses only named data-object metadata (present: $present, unrelated: $unrelated)",
+    async ({ present, unrelated }) => {
+      const files = await readHomeFiles(
+        async () => ({
+          result: {
+            parts: [
+              {
+                kind: "file",
+                file: { bytes: Buffer.from("source bytes").toString("base64") },
+                metadata: {
+                  "urn:unrelated": unrelated,
+                  ...(present
+                    ? {
+                        "urn:agentenv:data-objects/v1": {
+                          path: "selected.txt",
+                        },
+                      }
+                    : {}),
+                },
+              },
+            ],
+          },
+        }),
+        (text) => text,
+        ["selected.txt"],
+      );
+      expect(files).toEqual([
+        {
+          path: present ? "selected.txt" : undefined,
+          bytes: Buffer.from("source bytes"),
+        },
+      ]);
+    },
+  );
+
   it("counts base64, the envelope, and the copies held while the answer is parsed", () => {
     expect(guestFileAnswerBytes(3, 1)).toBeGreaterThan(3);
     expect(guestFileAnswerBytes(3, 2)).toBeGreaterThan(
